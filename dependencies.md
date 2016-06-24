@@ -1,5 +1,5 @@
 # Google Apps Script Project: SheetsMore
-This repo (SheetsMore) was automatically updated on 21 June 2016 15:18:18 BST by GasGit
+This repo (SheetsMore) was automatically updated on 24 June 2016 18:01:00 BST by GasGit
 
 For more information see the [desktop liberation site](http://ramblings.mcpher.com/Home/excelquirks/drivesdk/gettinggithubready "desktop liberation") or [contact me on G+](https://plus.google.com/+BruceMcpherson "Bruce McPherson - GDE")
 ## Details for Apps Script project SheetsMore
