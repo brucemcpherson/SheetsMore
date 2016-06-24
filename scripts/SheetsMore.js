@@ -4,7 +4,8 @@ function test () {
   // this creates a new filter processing ob
   var sMore = new SheetsMore()
   .setAccessToken(ScriptApp.getOAuthToken())
-  .setId("1CfYSJDTWtpCByMAzCsJ82iZVo_FPxQbo0cFTCiwnfp8");
+  .setId("1CfYSJDTWtpCByMAzCsJ82iZVo_FPxQbo0cFTCiwnfp8")
+  .setApplyFilterViews(true);
   
   // this should be done to fetch and apply the current filter state
   sMore.applyFilters();
@@ -14,7 +15,7 @@ function test () {
   testBook.getSheets()
   .forEach(function(d) {
     // tells if the data is filtered for the given range
-    Logger.log(sMore.isFiltered (d.getDataRange()));
+    Logger.log(d.getName() +':'+sMore.isFiltered (d.getDataRange()));
     
     // gets the values + the filtered values -- THIS IS WORK IN PROGRESS and writes the selected data out to another sheet
     var result = sMore.getValues(d.getDataRange());
@@ -30,6 +31,17 @@ function test () {
         resultSheet.getRange(1,1,values.length,values[0].length).setValues(values);
       }
     }
+    
+    // do a partial range test
+    var partialSheet = testBook.getSheetByName(d.getName()+"Partial");
+    if (partialSheet) {
+      var result = sMore.getValues(d.getRange('b2:d4'));
+      var values = result.filteredValues;
+      partialSheet.clearContents();
+      if (values.length) {
+        partialSheet.getRange(1,1,values.length,values[0].length).setValues(values);
+      }
+    }
   });
 }
 
@@ -40,7 +52,17 @@ function test () {
 */
 var SheetsMore = function() {
 
-  var self  = this, accessToken_, id_, filters_;
+  var self  = this, accessToken_, id_, filters_, applyFilterViews_ =true;
+  
+  /**
+  * whether to apply filterviews
+  * @param {boolean} applyViews whether to apply
+  * @return {SheetsMore} self
+  */
+  self.setApplyFilterViews = function (applyViews) {
+    applyFilterViews_ = applyViews;
+    return self;
+  };
   
   /**
   * set up the access token
@@ -103,14 +125,13 @@ var SheetsMore = function() {
     
     // get any filtering that needs to be done
     var filters = self.getFiltered(range);
-Logger.log(filters);
-Logger.log('conditions ' + containsConditions_ (filters));
+
     
     // play around with validation for filter rules .. dont think this approach will be viable
     var play = null;  // probably wont do this... containsConditions_(filters) ?  copyToValidate_ (range) : null;
 
     // filter those values
-    var filterMap = filterMap_ (filters, values,play);
+    var filterMap = filterMap_ (filters, values,range);
     
     // deletet that play sheet
     if (play) {
@@ -164,17 +185,20 @@ Logger.log('conditions ' + containsConditions_ (filters));
     return (filters_||[]).filter (function (d) {
       return d.properties.sheetId === sheetId; 
     }).reduce(function (p,c) {
-      if (c.basicFilter && overlap_ (c.basicFilter.range)) p.push (c.basicFilter);
-     
-      (c.filterViews || []).forEach(function (d) {
-        if ( overlap_ (d.range)) p.push (d);
-      
-      });
+      if (c.basicFilter && overlap_ (c.basicFilter.range)) {
+        p.push (c.basicFilter);
+      }
+      if (applyFilterViews_) {
+        (c.filterViews || []).forEach(function (d) {
+          if ( overlap_ (d.range)) p.push (d);
+        });
+      }
       return p;
     },[]);
 
     function overlap_ (ob) {
-      return !ob || !( sci > ob.endColumnIndex || eci < ob.startColumnIndex || sri > ob.endRowIndex || eri < ob.startRowIndex);
+      // start row/column are zero based, ends are 1 based
+      return !ob || !( sci > ob.endColumnIndex || eci < ob.startColumnIndex +1 || sri > ob.endRowIndex || eri < ob.startRowIndex +1);
     }
  
   };
@@ -213,50 +237,67 @@ Logger.log('conditions ' + containsConditions_ (filters));
 
   }
   
-  function filterMap_ (filters, values) {
+  function filterMap_ (filters, values,range) {
 
     // generate a map to show which row indexes were included
-    // TODO some offset work if the values don't correspond to the sheet datarange.
-    var rowIdx = 0;
+    // TODO some offset work if the values don't correspond to the sheet datarange... 
+    // if the filterrange,valuesrange start at different places there's a bug in here that I havent tracked down
+    // also Romain reported that he's found some filters with no crieria column definiion in some sheets 
+    // not sure what that means to the logic, but for now they wont work
+    // if anyone figures out how to treat such filters tehn comment here
+    var rowStartOffset = range.getRow() - 1;
+    var colStartOffset = range.getColumn() - 1;
+    
+    // this is the offset within the values
+    var rowOffset = 0;
+    
     return values.reduce(function (p,row) {
+
       if (filters.every(function (f) {
 
         return !f.criteria || Object.keys(f.criteria).every(function(c){
-          var colIdx = parseInt (c , 10);
+          // the criteria column numbers are 0 based
+          var colOffset = parseInt (c , 10);
+          
+          // but the effective column needs to take account of the start of the tested range & filter range 
+          var valuesColumn = colOffset + f.range.startColumnIndex  - colStartOffset;
           
           // returns true if it's a keepable value
           var keep = true;
-          
-          // it's not in the target range anyway
-          if (applies_(f.range,rowIdx,colIdx)) {
-          
+
+          // always keep the header row,, otherwise check if its within range
+  
+          if ( (rowOffset || rowStartOffset !==f.range.startIndex)  && applies_(f.range,rowOffset + rowStartOffset,colOffset + colStartOffset)) {
+
             // there are no hidden value matches
-            if (keep && f.criteria[c].hiddenValues) {
-               keep = !f.criteria[c].hiddenValues.some(function (h) {
-                return matches_ (row[colIdx] , h) ; 
+
+            if (keep && f.criteria[colOffset].hiddenValues) {
+               keep = !f.criteria[colOffset].hiddenValues.some(function (h) {
+                return matches_ (row[valuesColumn] , h) ; 
               });
             }
             
             // there are no hidden value matches
-            if (keep && f.criteria[c].condition) {
-              keep =  conditionValueMatches_ (row[colIdx] , f.criteria[c].condition) ; 
+            if (keep && f.criteria[colOffset].condition) {
+              keep =  conditionValueMatches_ (row[valuesColumn] , f.criteria[colOffset].condition) ; 
             }
           
           }
-          
           return keep;
 
         }); 
       })){
-        p.push (rowIdx);
+        p.push (rowOffset);
       }
-      rowIdx++;
+      rowOffset++;
       return p;      
     },[]);
     
-    function applies_ (ob,rowIdx, colIdx) {
-      var x= !ob || !( colIdx > ob.endColumnIndex || colIdx < ob.startColumnIndex || rowIdx > ob.endRowIndex || rowIdx < ob.startRowIndex);
-      return x;
+    function applies_ (ob,rowOffset, colOffset) {
+      // starts seem to be offsets (0 based), ends are indexes (1 based)
+      return !ob || (
+        !(colOffset >= ob.endColumnIndex  || colOffset < ob.startColumnIndex || rowOffset >= ob.endRowIndex || rowOffset < ob.startRowIndex));
+
     }
     
     // there will probably be fuzzy versions of this to introduce
@@ -268,9 +309,7 @@ Logger.log('conditions ' + containsConditions_ (filters));
     // there will probably be fuzzy versions of this to introduce .. TODO
     function conditionValueMatches_ (a,condition) {
       try {
-        var x = conditionValueMatch_[condition.type] (a,condition);
-        Logger.log('condition result ' + x);
-        return x;
+        return conditionValueMatch_[condition.type] (a,condition);
       }
       catch (err) {
         throw new Error('condition ' + condition.type + ' not yet implemented');
@@ -280,7 +319,7 @@ Logger.log('conditions ' + containsConditions_ (filters));
   }
   // 
   var conditionValueMatch_ = (function () {
-    // TODO .. identify and skip the heading from filtering tests 
+
     // utility matchers
     function textContains (a,b) {
       return a.indexOf(b) !== -1;
