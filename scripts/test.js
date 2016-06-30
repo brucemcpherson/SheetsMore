@@ -5,17 +5,17 @@ function test () {
   var sMore = new SheetsMore()
   .setAccessToken(ScriptApp.getOAuthToken())
   .setId("1CfYSJDTWtpCByMAzCsJ82iZVo_FPxQbo0cFTCiwnfp8")
-  .setApplyFilterViews(true);
+  .enableFilterViews(true);
   
   // this should be done to fetch and apply the current filter state
-  sMore.applyFilters();
+  sMore.applyFiltersToData();
 
   // test out all the sheets in the given book
   var testBook = SpreadsheetApp.openById(sMore.getId());
   testBook.getSheets()
   .forEach(function(d) {
     // tells if the data is filtered for the given range
-    Logger.log(d.getName() +':'+sMore.isFiltered (d.getDataRange()));
+    Logger.log(d.getName() +':'+sMore.isDataFiltered (d.getDataRange()));
     
     // gets the values + the filtered values -- THIS IS WORK IN PROGRESS and writes the selected data out to another sheet
     var result = sMore.getValues(d.getDataRange());
