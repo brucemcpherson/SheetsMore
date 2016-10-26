@@ -11,7 +11,8 @@ var Fiddler = function () {
       headerOb_ , 
       dataOb_=[],
       hasHeaders_ = true,
-      functions_;
+      functions_,
+      renameDups_ = true;
   
   
   /**
@@ -100,6 +101,7 @@ var Fiddler = function () {
     selectRows: function (value , properties) {
       return true;
     }
+    
 
   }; 
   
@@ -167,6 +169,67 @@ var Fiddler = function () {
     return self;
   };
 
+  self.setRenameDups = function (rename) {
+    renameDups_ = rename;
+  };
+  /**
+   * get the unique values in a column
+   * @param {string} columnName
+   * @return {[*]} array of unique values
+   */
+  self.getUniqueValues = function (columnName) {
+  
+    return self.getColumnValues(columnName).filter(function (d,i,a) {
+      return a.indexOf(d) === i;
+    });
+
+    
+  }
+  /**
+   * iterate through each row - nodifies the data in this fiddler instance
+   * @param {[string]} [columnNames] optional which column names to use (default is all)
+   * @param {boolean} [keepLast=false] whether to keep the last row or the first found
+   * @return {Fiddler} self
+   */
+  self.filterUnique = function (columnNames , keepLast) {
+
+    var headers = self.getHeaders();
+    cols = columnNames || headers;
+    if (!Array.isArray(cols)) cols = [cols];
+    
+    // may need to reverse
+    var data = dataOb_.slice();
+    if (!keepLast && columnNames ) {
+      data.reverse();
+    }
+    // check params are valid
+    if (cols.some(function(d) {
+      return headers.indexOf(d) === -1;
+    })) { 
+      throw 'unknown columns in ' + JSON.stringify(cols) + ' compared to ' + JSON.stringify(headers); 
+    } 
+       
+        
+    // filter out dups
+    data = data.filter(function(d,i,a) {
+      return !a.slice(i+1).some(function (e) {
+        return cols.every(function (f) {
+          return d[f] === e[f];
+        });
+      });
+    });
+    
+    // reverse again
+    if (!keepLast && columnNames ) {
+      data.reverse();
+    }
+    
+    // register
+    dataOb_ = data;
+    return self;
+
+  };
+  
   /**
    * iterate through each row - nodifies the data in this fiddler instance
    * @param {function} [func] optional function that shoud return true if the row is to be kept
@@ -716,8 +779,13 @@ var Fiddler = function () {
    * @return {Fiddle} self
    */
   self.init = function () {
-    headerOb_ = makeHeaderOb_();
-    dataOb_ = makeDataOb_();
+    if (values_) {
+      headerOb_ = makeHeaderOb_();
+      dataOb_ = makeDataOb_();
+    }
+    else {
+      headerOb_ = dataOb_ = null;
+    }
     return self;
   };
   
@@ -746,7 +814,7 @@ var Fiddler = function () {
    */
   self.setValues = function (values) {
     values_= values;
-    return self.init();
+    return self.init() ;
   };
   
   /**
@@ -772,16 +840,28 @@ var Fiddler = function () {
    */
   function makeHeaderOb_ () {
     
-    return values_.length ? 
+    return values_ && values_.length ? 
       ((self.hasHeaders() ? 
        values_[0] : values_[0].map(function(d,i) {
          return columnLabelMaker_ (i+1);
        }))
     .reduce (function (p,c) {
       var key = c.toString();
-      if (p.hasOwnProperty(key)) {
-        throw 'duplicate column header ' + key;
+      
+      if (p.hasOwnProperty(key) ) {
+        if(!renameDups_) {
+          throw 'duplicate column header ' + key;
+        }
+        else {
+          // generate a unique name
+          var nd = 1;
+          while (p.hasOwnProperty(key+nd)) {
+            nd++;
+          }
+          key = key+nd;
+        }
       }
+      
       p[key]=Object.keys(p).length;
       return p;
     },{})) : null;
